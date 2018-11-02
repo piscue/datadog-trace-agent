@@ -10,6 +10,7 @@ import (
 	"github.com/DataDog/datadog-trace-agent/config"
 	"github.com/DataDog/datadog-trace-agent/info"
 	"github.com/DataDog/datadog-trace-agent/model"
+	"github.com/DataDog/datadog-trace-agent/statsd"
 	"github.com/DataDog/datadog-trace-agent/testutil"
 	writerconfig "github.com/DataDog/datadog-trace-agent/writer/config"
 	"github.com/stretchr/testify/assert"
@@ -22,7 +23,7 @@ func TestServiceWriter_SenderMaxPayloads(t *testing.T) {
 	serviceWriter, _, _, _ := testServiceWriter()
 
 	// When checking its default sender configuration
-	queuableSender := serviceWriter.BaseWriter.payloadSender.(*QueuablePayloadSender)
+	queuableSender := serviceWriter.sender.(*queuableSender)
 
 	// Then the MaxQueuedPayloads setting should be -1 (unlimited)
 	assert.Equal(-1, queuableSender.conf.MaxQueuedPayloads)
@@ -120,7 +121,7 @@ func TestServiceWriter_UpdateInfoHandling(t *testing.T) {
 	time.Sleep(2 * serviceWriter.conf.FlushPeriod)
 
 	// And then sending a third payload with other 3 traces with an errored out endpoint with retry
-	testEndpoint.SetError(&RetriableError{
+	testEndpoint.SetError(&retriableError{
 		err:      fmt.Errorf("retriable error"),
 		endpoint: testEndpoint,
 	})
@@ -157,7 +158,7 @@ func TestServiceWriter_UpdateInfoHandling(t *testing.T) {
 
 	// Retry counts
 	retriesSummary := countSummaries["datadog.trace_agent.service_writer.retries"]
-	assert.True(len(retriesSummary.Calls) >= 3, "There should have been multiple retries count calls")
+	assert.True(len(retriesSummary.Calls) >= 2, "There should have been multiple retries count calls")
 	assert.True(retriesSummary.Sum >= expectedMinNumRetries)
 
 	// Error counts
@@ -184,12 +185,12 @@ func calculateMetadataPayloadSize(metadata model.ServicesMetadata) int64 {
 }
 
 func assertMetadata(assert *assert.Assertions, expectedHeaders map[string]string,
-	expectedMetadata model.ServicesMetadata, payload Payload) {
+	expectedMetadata model.ServicesMetadata, p *payload) {
 	servicesMetadata := model.ServicesMetadata{}
 
-	assert.NoError(json.Unmarshal(payload.Bytes, &servicesMetadata), "Stats payload should unmarshal correctly")
+	assert.NoError(json.Unmarshal(p.bytes, &servicesMetadata), "Stats payload should unmarshal correctly")
 
-	assert.Equal(expectedHeaders, payload.Headers, "Headers should match expectation")
+	assert.Equal(expectedHeaders, p.headers, "Headers should match expectation")
 	assert.Equal(expectedMetadata, servicesMetadata, "Service metadata should match expectation")
 }
 
@@ -200,9 +201,9 @@ func testServiceWriter() (*ServiceWriter, chan model.ServicesMetadata, *testEndp
 	}
 	serviceWriter := NewServiceWriter(conf, serviceChannel)
 	testEndpoint := &testEndpoint{}
-	serviceWriter.BaseWriter.payloadSender.setEndpoint(testEndpoint)
-	testStatsClient := &testutil.TestStatsClient{}
-	serviceWriter.statsClient = testStatsClient
+	serviceWriter.sender.setEndpoint(testEndpoint)
+	testStatsClient := statsd.Client.(*testutil.TestStatsClient)
+	testStatsClient.Reset()
 
 	return serviceWriter, serviceChannel, testEndpoint, testStatsClient
 }

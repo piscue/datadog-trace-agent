@@ -11,6 +11,7 @@ import (
 	"time"
 
 	log "github.com/cihub/seelog"
+	"github.com/stretchr/testify/assert"
 
 	"github.com/DataDog/datadog-trace-agent/config"
 	"github.com/DataDog/datadog-trace-agent/info"
@@ -18,8 +19,15 @@ import (
 	"github.com/DataDog/datadog-trace-agent/obfuscate"
 	"github.com/DataDog/datadog-trace-agent/sampler"
 	"github.com/DataDog/datadog-trace-agent/testutil"
-	"github.com/stretchr/testify/assert"
 )
+
+type mockSamplerEngine struct {
+	engine sampler.Engine
+}
+
+func newMockSampler(wantSampled bool, wantRate float64) *Sampler {
+	return &Sampler{engine: testutil.NewMockEngine(wantSampled, wantRate)}
+}
 
 func TestWatchdog(t *testing.T) {
 	if testing.Short() {
@@ -27,7 +35,7 @@ func TestWatchdog(t *testing.T) {
 	}
 
 	conf := config.New()
-	conf.APIKey = "apikey_2"
+	conf.Endpoints[0].APIKey = "apikey_2"
 	conf.MaxMemory = 1e7
 	conf.WatchdogInterval = time.Millisecond
 
@@ -118,7 +126,7 @@ func TestProcess(t *testing.T) {
 		// • resulting resource is obfuscated with replacements applied
 		// • resulting "sql.query" tag is obfuscated with no replacements applied
 		cfg := config.New()
-		cfg.APIKey = "test"
+		cfg.Endpoints[0].APIKey = "test"
 		cfg.ReplaceTags = []*config.ReplaceRule{{
 			Name: "resource.name",
 			Re:   regexp.MustCompile("AND.*"),
@@ -144,7 +152,7 @@ func TestProcess(t *testing.T) {
 
 	t.Run("Blacklister", func(t *testing.T) {
 		cfg := config.New()
-		cfg.APIKey = "test"
+		cfg.Endpoints[0].APIKey = "test"
 		cfg.Ignore["resource"] = []string{"^INSERT.*"}
 		ctx, cancel := context.WithCancel(context.Background())
 		agent := NewAgent(ctx, cfg)
@@ -178,14 +186,14 @@ func TestProcess(t *testing.T) {
 
 	t.Run("Stats/Priority", func(t *testing.T) {
 		cfg := config.New()
-		cfg.APIKey = "test"
+		cfg.Endpoints[0].APIKey = "test"
 		ctx, cancel := context.WithCancel(context.Background())
 		agent := NewAgent(ctx, cfg)
 		defer cancel()
 
 		now := time.Now()
-		disabled := float64(-99)
-		for _, key := range []float64{
+		disabled := int(-99)
+		for _, key := range []int{
 			disabled, -1, -1, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2, 2,
 		} {
 			span := &model.Span{
@@ -196,7 +204,7 @@ func TestProcess(t *testing.T) {
 				Metrics:  map[string]float64{},
 			}
 			if key != disabled {
-				span.Metrics[sampler.SamplingPriorityKey] = key
+				span.SetSamplingPriority(key)
 			}
 			agent.Process(model.Trace{span})
 		}
@@ -208,39 +216,151 @@ func TestProcess(t *testing.T) {
 		assert.EqualValues(t, 4, stats.TracesPriority1)
 		assert.EqualValues(t, 5, stats.TracesPriority2)
 	})
+}
 
-	t.Run("Stats/Dropped", func(t *testing.T) {
-		cfg := config.New()
-		cfg.APIKey = "test"
-		ctx, cancel := context.WithCancel(context.Background())
-		agent := NewAgent(ctx, cfg)
-		defer cancel()
+func TestSampling(t *testing.T) {
+	for name, tt := range map[string]struct {
+		// hasErrors will be true if the input trace should have errors
+		// hasPriority will be true if the input trace should have sampling priority set
+		hasErrors, hasPriority bool
 
-		span := &model.Span{
-			Resource: "SELECT name FROM people WHERE age = 42 AND extra = 55",
-			Type:     "sql",
-			Start:    time.Now().Add(-2 * time.Hour).UnixNano(),
-			Duration: (500 * time.Millisecond).Nanoseconds(),
-			Metrics:  map[string]float64{},
-		}
-		agent.Process(model.Trace{span, span})
+		// scoreRate, scoreErrorRate, priorityRate are the rates used by the mock samplers
+		scoreRate, scoreErrorRate, priorityRate float64
 
-		stats := agent.Receiver.Stats.GetTagStats(info.Tags{})
-		assert.EqualValues(t, 1, stats.TracesDropped)
-		assert.EqualValues(t, 2, stats.SpansDropped)
-	})
+		// scoreSampled, scoreErrorSampled, prioritySampled are the sample decisions of the mock samplers
+		scoreSampled, scoreErrorSampled, prioritySampled bool
+
+		// wantRate and wantSampled are the expected result
+		wantRate    float64
+		wantSampled bool
+	}{
+		"score and priority rate": {
+			hasPriority:  true,
+			scoreRate:    0.5,
+			priorityRate: 0.6,
+			wantRate:     sampler.CombineRates(0.5, 0.6),
+		},
+		"score only rate": {
+			scoreRate:    0.5,
+			priorityRate: 0.1,
+			wantRate:     0.5,
+		},
+		"error and priority rate": {
+			hasErrors:      true,
+			hasPriority:    true,
+			scoreErrorRate: 0.8,
+			priorityRate:   0.2,
+			wantRate:       sampler.CombineRates(0.8, 0.2),
+		},
+		"score not sampled decision": {
+			scoreSampled: false,
+			wantSampled:  false,
+		},
+		"score sampled decision": {
+			scoreSampled: true,
+			wantSampled:  true,
+		},
+		"score sampled priority not sampled": {
+			hasPriority:     true,
+			scoreSampled:    true,
+			prioritySampled: false,
+			wantSampled:     true,
+		},
+		"score not sampled priority sampled": {
+			hasPriority:     true,
+			scoreSampled:    false,
+			prioritySampled: true,
+			wantSampled:     true,
+		},
+		"score sampled priority sampled": {
+			hasPriority:     true,
+			scoreSampled:    true,
+			prioritySampled: true,
+			wantSampled:     true,
+		},
+		"score and priority not sampled": {
+			hasPriority:     true,
+			scoreSampled:    false,
+			prioritySampled: false,
+			wantSampled:     false,
+		},
+		"error not sampled decision": {
+			hasErrors:         true,
+			scoreErrorSampled: false,
+			wantSampled:       false,
+		},
+		"error sampled decision": {
+			hasErrors:         true,
+			scoreErrorSampled: true,
+			wantSampled:       true,
+		},
+		"error sampled priority not sampled": {
+			hasErrors:         true,
+			hasPriority:       true,
+			scoreErrorSampled: true,
+			prioritySampled:   false,
+			wantSampled:       true,
+		},
+		"error not sampled priority sampled": {
+			hasErrors:         true,
+			hasPriority:       true,
+			scoreErrorSampled: false,
+			prioritySampled:   true,
+			wantSampled:       true,
+		},
+		"error sampled priority sampled": {
+			hasErrors:         true,
+			hasPriority:       true,
+			scoreErrorSampled: true,
+			prioritySampled:   true,
+			wantSampled:       true,
+		},
+		"error and priority not sampled": {
+			hasErrors:         true,
+			hasPriority:       true,
+			scoreErrorSampled: false,
+			prioritySampled:   false,
+			wantSampled:       false,
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			a := &Agent{
+				ScoreSampler:       newMockSampler(tt.scoreSampled, tt.scoreRate),
+				ErrorsScoreSampler: newMockSampler(tt.scoreErrorSampled, tt.scoreErrorRate),
+				PrioritySampler:    newMockSampler(tt.prioritySampled, tt.priorityRate),
+			}
+			root := &model.Span{
+				Service:  "serv1",
+				Start:    time.Now().UnixNano(),
+				Duration: (100 * time.Millisecond).Nanoseconds(),
+				Metrics:  map[string]float64{},
+			}
+
+			if tt.hasErrors {
+				root.Error = 1
+			}
+			pt := model.ProcessedTrace{Trace: model.Trace{root}, Root: root}
+			if tt.hasPriority {
+				pt.Root.SetSamplingPriority(1)
+			}
+
+			sampled, rate := a.sample(pt)
+			assert.EqualValues(t, tt.wantRate, rate)
+			assert.EqualValues(t, tt.wantSampled, sampled)
+		})
+	}
 }
 
 func BenchmarkAgentTraceProcessing(b *testing.B) {
 	c := config.New()
-	c.APIKey = "test"
+	c.Endpoints[0].APIKey = "test"
 
 	runTraceProcessingBenchmark(b, c)
 }
 
 func BenchmarkAgentTraceProcessingWithFiltering(b *testing.B) {
 	c := config.New()
-	c.APIKey = "test"
+	c.Endpoints[0].APIKey = "test"
 	c.Ignore["resource"] = []string{"[0-9]{3}", "foobar", "G.T [a-z]+", "[^123]+_baz"}
 
 	runTraceProcessingBenchmark(b, c)
@@ -250,7 +370,7 @@ func BenchmarkAgentTraceProcessingWithFiltering(b *testing.B) {
 // this means we won't compesate the overhead of filtering by dropping traces
 func BenchmarkAgentTraceProcessingWithWorstCaseFiltering(b *testing.B) {
 	c := config.New()
-	c.APIKey = "test"
+	c.Endpoints[0].APIKey = "test"
 	c.Ignore["resource"] = []string{"[0-9]{3}", "foobar", "aaaaa?aaaa", "[^123]+_baz"}
 
 	runTraceProcessingBenchmark(b, c)
@@ -271,7 +391,7 @@ func runTraceProcessingBenchmark(b *testing.B, c *config.AgentConfig) {
 
 func BenchmarkWatchdog(b *testing.B) {
 	conf := config.New()
-	conf.APIKey = "apikey_2"
+	conf.Endpoints[0].APIKey = "apikey_2"
 	ctx, cancelFunc := context.WithCancel(context.Background())
 	defer cancelFunc()
 	agent := NewAgent(ctx, conf)

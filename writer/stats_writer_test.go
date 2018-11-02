@@ -13,6 +13,7 @@ import (
 	"github.com/DataDog/datadog-trace-agent/config"
 	"github.com/DataDog/datadog-trace-agent/info"
 	"github.com/DataDog/datadog-trace-agent/model"
+	"github.com/DataDog/datadog-trace-agent/statsd"
 	"github.com/DataDog/datadog-trace-agent/testutil"
 	writerconfig "github.com/DataDog/datadog-trace-agent/writer/config"
 	"github.com/stretchr/testify/assert"
@@ -60,8 +61,8 @@ func TestStatsWriter_StatHandling(t *testing.T) {
 		"Content-Encoding":             "gzip",
 	}
 
-	assertStatsPayload(assert, expectedHeaders, testStats1, &payload1)
-	assertStatsPayload(assert, expectedHeaders, testStats2, &payload2)
+	assertStatsPayload(assert, expectedHeaders, testStats1, payload1)
+	assertStatsPayload(assert, expectedHeaders, testStats2, payload2)
 }
 
 func TestStatsWriter_UpdateInfoHandling(t *testing.T) {
@@ -120,7 +121,7 @@ func TestStatsWriter_UpdateInfoHandling(t *testing.T) {
 	time.Sleep(2 * statsWriter.conf.UpdateInfoPeriod)
 
 	// And then sending a third payload with other 3 traces with an errored out endpoint with retry
-	testEndpoint.SetError(&RetriableError{
+	testEndpoint.SetError(&retriableError{
 		err:      fmt.Errorf("non retriable error"),
 		endpoint: testEndpoint,
 	})
@@ -161,7 +162,7 @@ func TestStatsWriter_UpdateInfoHandling(t *testing.T) {
 
 	// Retry counts
 	retriesSummary := countSummaries["datadog.trace_agent.stats_writer.retries"]
-	assert.True(len(retriesSummary.Calls) >= 3, "There should have been multiple retries count calls")
+	assert.True(len(retriesSummary.Calls) >= 2, "There should have been multiple retries count calls")
 	assert.True(retriesSummary.Sum >= expectedMinNumRetries)
 
 	// Error counts
@@ -365,11 +366,10 @@ func calculateStatPayloadSize(buckets []model.StatsBucket) int64 {
 	return int64(len(data))
 }
 
-func assertStatsPayload(assert *assert.Assertions, headers map[string]string, buckets []model.StatsBucket,
-	payload *Payload) {
+func assertStatsPayload(assert *assert.Assertions, headers map[string]string, buckets []model.StatsBucket, p *payload) {
 	statsPayload := model.StatsPayload{}
 
-	reader := bytes.NewBuffer(payload.Bytes)
+	reader := bytes.NewBuffer(p.bytes)
 	gzipReader, err := gzip.NewReader(reader)
 
 	assert.NoError(err, "Gzip reader should work correctly")
@@ -378,7 +378,7 @@ func assertStatsPayload(assert *assert.Assertions, headers map[string]string, bu
 
 	assert.NoError(jsonDecoder.Decode(&statsPayload), "Stats payload should unmarshal correctly")
 
-	assert.Equal(headers, payload.Headers, "Headers should match expectation")
+	assert.Equal(headers, p.headers, "Headers should match expectation")
 	assert.Equal(testHostName, statsPayload.HostName, "Hostname should match expectation")
 	assert.Equal(testEnv, statsPayload.Env, "Env should match expectation")
 	assert.Equal(buckets, statsPayload.Stats, "Stat buckets should match expectation")
@@ -393,9 +393,9 @@ func testStatsWriter() (*StatsWriter, chan []model.StatsBucket, *testEndpoint, *
 	}
 	statsWriter := NewStatsWriter(conf, statsChannel)
 	testEndpoint := &testEndpoint{}
-	statsWriter.BaseWriter.payloadSender.setEndpoint(testEndpoint)
-	testStatsClient := &testutil.TestStatsClient{}
-	statsWriter.statsClient = testStatsClient
+	statsWriter.sender.setEndpoint(testEndpoint)
+	testStatsClient := statsd.Client.(*testutil.TestStatsClient)
+	testStatsClient.Reset()
 
 	return statsWriter, statsChannel, testEndpoint, testStatsClient
 }
