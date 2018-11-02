@@ -308,15 +308,7 @@ func (a *Agent) Process(t model.Trace) {
 		}
 
 		sampledTrace.Transactions = a.TransactionSampler.Extract(pt)
-		// Attach the sample rate of previous sampling stages to the extracted transactions.
-		for _, tr := range sampledTrace.Transactions {
-			if clientSampleRate != 1 {
-				tr.SetMetric(sampler.ClientSampleRateKey, clientSampleRate)
-			}
-			if preSamplerRate != 1 {
-				tr.SetMetric(sampler.PreSampleRateKey, preSamplerRate)
-			}
-		}
+		// TODO: attach to these transactions the client, pre-sampler and transaction sample rates.
 
 		if !sampledTrace.Empty() {
 			a.sampledTraceChan <- &sampledTrace
