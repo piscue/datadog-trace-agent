@@ -22,7 +22,7 @@ func NewLegacyExtractor(rateByService map[string]float64) Extractor {
 // Extract decides whether to extract an apm event from the provided span based on a sampling rate on that span's
 // service. If this rate doesn't exist or the provided span is not a top level one, then no decision is done and
 // UnknownRate is returned.
-func (e *legacyExtractor) Extract(s *model.WeightedSpan, priority model.SamplingPriority) (extract bool, rate float64) {
+func (e *legacyExtractor) Extract(s *model.WeightedSpan, hasPriority bool, priority model.SamplingPriority) (extract bool, rate float64) {
 	if !s.TopLevel {
 		return false, RateNone
 	}

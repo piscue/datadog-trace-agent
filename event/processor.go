@@ -55,15 +55,11 @@ func (p *Processor) Process(t model.ProcessedTrace, params ProcessorParams) (eve
 
 	priority, hasPriority := t.GetSamplingPriority()
 
-	if !hasPriority {
-		priority = model.PriorityNone
-	}
-
 	for _, span := range t.WeightedTrace {
 		var event *model.APMEvent
 
 		for _, extractor := range p.extractors {
-			extract, rate := extractor.Extract(span, priority)
+			extract, rate := extractor.Extract(span, hasPriority, priority)
 
 			if rate == RateNone {
 				// If the extractor did not make any extraction decision, try the next one

@@ -10,6 +10,6 @@ func NewNoopExtractor() Extractor {
 	return &noopExtractor{}
 }
 
-func (e *noopExtractor) Extract(_ *model.WeightedSpan, _ model.SamplingPriority) (extract bool, rate float64) {
+func (e *noopExtractor) Extract(_ *model.WeightedSpan, _ bool, _ model.SamplingPriority) (extract bool, rate float64) {
 	return false, 0
 }
