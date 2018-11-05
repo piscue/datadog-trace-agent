@@ -25,7 +25,7 @@ func (e *metricBasedExtractor) Extract(s *model.WeightedSpan, priority model.Sam
 		return false, RateNone
 	}
 
-	if extractionRate > 0 && priority >= model.UserKeepPriority {
+	if extractionRate > 0 && priority >= model.PriorityUserKeep {
 		// If the trace has been manually sampled, we keep all matching spans
 		return true, 1
 	}

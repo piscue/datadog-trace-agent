@@ -36,7 +36,7 @@ func (e *fixedRateExtractor) Extract(s *model.WeightedSpan, priority model.Sampl
 		return false, RateNone
 	}
 
-	if extractionRate > 0 && priority >= model.UserKeepPriority {
+	if extractionRate > 0 && priority >= model.PriorityUserKeep {
 		// If the span has been manually sampled, we always want to extract events.
 		return true, 1
 	}

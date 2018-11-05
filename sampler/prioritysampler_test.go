@@ -36,7 +36,7 @@ func getTestTraceWithService(t *testing.T, service string, s *PriorityEngine) (m
 		&model.Span{TraceID: tID, SpanID: 2, ParentID: 1, Start: 100, Duration: 200000, Service: service, Type: "sql"},
 	}
 	r := rand.Float64()
-	priority := model.AutoDropPriority
+	priority := model.PriorityAutoDrop
 	rates := s.getRateByService()
 	key := byServiceKey(trace[0].Service, defaultEnv)
 	var rate float64
@@ -46,7 +46,7 @@ func getTestTraceWithService(t *testing.T, service string, s *PriorityEngine) (m
 		rate = 1
 	}
 	if r <= rate {
-		priority = model.AutoKeepPriority
+		priority = model.PriorityAutoKeep
 	}
 	trace[0].SetSamplingPriority(priority)
 	return trace, trace[0]
@@ -105,7 +105,7 @@ func TestPrioritySample(t *testing.T) {
 	s = getTestPriorityEngine()
 	trace, root = getTestTraceWithService(t, "my-service", s)
 
-	root.SetSamplingPriority(model.UserKeepPriority)
+	root.SetSamplingPriority(model.PriorityUserKeep)
 	sampled, rate = s.Sample(trace, root, env)
 	assert.True(sampled, "trace with high priority is kept")
 	assert.Equal(1.0, rate, "sampling all traces")

@@ -12,7 +12,6 @@ type Processor struct {
 type ProcessorParams struct {
 	ClientSampleRate float64
 	PreSampleRate    float64
-	ExtractionCb     func(event *model.APMEvent)
 }
 
 // NewProcessor returns a new instance of Processor configured with the provided extractors and samplers.
@@ -49,15 +48,15 @@ func (p *Processor) Stop() {
 // sampled events along with the total count of extracted events. Process also takes a ProcessorParams struct from
 // which trace rates are extracted and set on every sampled event. An extraction callback can also be set which will
 // be called for every extracted event.
-func (p *Processor) Process(t model.ProcessedTrace, params ProcessorParams) (events []*model.APMEvent) {
+func (p *Processor) Process(t model.ProcessedTrace, params ProcessorParams) (events []*model.APMEvent, numExtracted int64) {
 	if len(p.extractors) == 0 {
-		return nil
+		return
 	}
 
 	priority, hasPriority := t.GetSamplingPriority()
 
 	if !hasPriority {
-		priority = model.UnknownPriority
+		priority = model.PriorityUnknown
 	}
 
 	for _, span := range t.WeightedTrace {
@@ -86,9 +85,7 @@ func (p *Processor) Process(t model.ProcessedTrace, params ProcessorParams) (eve
 			continue
 		}
 
-		if params.ExtractionCb != nil {
-			params.ExtractionCb(event)
-		}
+		numExtracted++
 
 		// Otherwise, apply event samplers to the extracted event
 		eventSampled := true

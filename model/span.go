@@ -1,6 +1,7 @@
 package model
 
 import (
+	"math"
 	"math/rand"
 )
 
@@ -19,15 +20,15 @@ type SamplingPriority int8
 
 const (
 	// UnknownPriority is the value for SamplingPriority when no priority sampling decision could be found.
-	UnknownPriority SamplingPriority = -99
+	PriorityUnknown SamplingPriority = math.MinInt8
 	// UserDropPriority is the value set by a user to explicitly drop a trace.
-	UserDropPriority SamplingPriority = -1
+	PriorityUserDrop SamplingPriority = -1
 	// AutoDropPriority is the value set by a tracer to suggest dropping a trace.
-	AutoDropPriority SamplingPriority = 0
+	PriorityAutoDrop SamplingPriority = 0
 	// AutoKeepPriority is the value set by a tracer to suggest keeping a trace.
-	AutoKeepPriority SamplingPriority = 1
+	PriorityAutoKeep SamplingPriority = 1
 	// UserKeepPriority is the value set by a user to explicitly keep a trace.
-	UserKeepPriority SamplingPriority = 2
+	PriorityUserKeep SamplingPriority = 2
 )
 
 // RandomID generates a random uint64 that we use for IDs

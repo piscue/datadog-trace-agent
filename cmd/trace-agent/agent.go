@@ -263,12 +263,12 @@ func (a *Agent) Process(t model.Trace) {
 		}
 
 		// NOTE: Events can be processed on non-sampled traces.
-		numExtracted := 0
-		tracePkg.Events = a.EventProcessor.Process(pt, event.ProcessorParams{
+		events, numExtracted := a.EventProcessor.Process(pt, event.ProcessorParams{
 			ClientSampleRate: clientSampleRate,
 			PreSampleRate:    preSamplerRate,
-			ExtractionCb:     func(e *model.APMEvent) { numExtracted++ },
 		})
+		tracePkg.Events = events
+
 		atomic.AddInt64(&ts.EventsExtracted, int64(numExtracted))
 		atomic.AddInt64(&ts.EventsSampled, int64(len(tracePkg.Events)))
 

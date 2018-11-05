@@ -196,21 +196,21 @@ func TestProcess(t *testing.T) {
 
 		now := time.Now()
 		for _, key := range []model.SamplingPriority{
-			model.UnknownPriority,
-			model.UserDropPriority,
-			model.UserDropPriority,
-			model.AutoDropPriority,
-			model.AutoDropPriority,
-			model.AutoDropPriority,
-			model.AutoKeepPriority,
-			model.AutoKeepPriority,
-			model.AutoKeepPriority,
-			model.AutoKeepPriority,
-			model.UserKeepPriority,
-			model.UserKeepPriority,
-			model.UserKeepPriority,
-			model.UserKeepPriority,
-			model.UserKeepPriority,
+			model.PriorityUnknown,
+			model.PriorityUserDrop,
+			model.PriorityUserDrop,
+			model.PriorityAutoDrop,
+			model.PriorityAutoDrop,
+			model.PriorityAutoDrop,
+			model.PriorityAutoKeep,
+			model.PriorityAutoKeep,
+			model.PriorityAutoKeep,
+			model.PriorityAutoKeep,
+			model.PriorityUserKeep,
+			model.PriorityUserKeep,
+			model.PriorityUserKeep,
+			model.PriorityUserKeep,
+			model.PriorityUserKeep,
 		} {
 			span := &model.Span{
 				Resource: "SELECT name FROM people WHERE age = 42 AND extra = 55",
@@ -219,7 +219,7 @@ func TestProcess(t *testing.T) {
 				Duration: (500 * time.Millisecond).Nanoseconds(),
 				Metrics:  map[string]float64{},
 			}
-			if key != model.UnknownPriority {
+			if key != model.PriorityUnknown {
 				span.SetSamplingPriority(key)
 			}
 			agent.Process(model.Trace{span})
@@ -511,7 +511,7 @@ Loop:
 			Sampled:       rand.Float64() < pctTraceSampled,
 		}
 
-		events := processor.Process(trace, event.ProcessorParams{})
+		events, _ := processor.Process(trace, event.ProcessorParams{})
 
 		totalSampled += len(events)
 

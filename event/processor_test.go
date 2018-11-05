@@ -59,11 +59,9 @@ func TestProcessor(t *testing.T) {
 			testSpans := createTestSpans("test", "test")
 			testTrace := model.ProcessedTrace{WeightedTrace: testSpans}
 
-			extracted := 0
-			events := p.Process(testTrace, ProcessorParams{
+			events, extracted := p.Process(testTrace, ProcessorParams{
 				ClientSampleRate: testClientSampleRate,
 				PreSampleRate:    testPreSampleRate,
-				ExtractionCb:     func(event *model.APMEvent) { extracted++ },
 			})
 			total := len(testSpans)
 			returned := len(events)
