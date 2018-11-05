@@ -390,53 +390,89 @@ func TestEventProcessorFromConf(t *testing.T) {
 		"serviceD": 1,
 	}
 
-	for name, testCase := range map[string]struct {
-		intakeSPS       float64
-		serviceName     string
-		opName          string
-		extractionRate  float64
-		pctTraceSampled float64
-		expectedEPS     float64
-		deltaPct        float64
-		duration        time.Duration
-	}{
-		"no match":               {intakeSPS: 100, serviceName: "serviceE", opName: "opA", extractionRate: -1, pctTraceSampled: 0.5, expectedEPS: 0, deltaPct: 0, duration: 10 * time.Second},
-		"metric - below max eps": {intakeSPS: 100, serviceName: "serviceD", opName: "opA", extractionRate: 0.5, pctTraceSampled: 0.5, expectedEPS: 50, deltaPct: 0.1, duration: 10 * time.Second},
+	for _, testCase := range []eventProcessorTestCase{
+		{name: "no match", intakeSPS: 100, serviceName: "serviceE", opName: "opA", extractionRate: -1, pctTraceSampled: 0.5, expectedEPS: 0, deltaPct: 0, duration: 10 * time.Second},
+		{name: "metric - below max eps", intakeSPS: 100, serviceName: "serviceD", opName: "opA", extractionRate: 0.5, pctTraceSampled: 0.5, expectedEPS: 50, deltaPct: 0.1, duration: 10 * time.Second},
 		// TODO: Attempt to reduce softness of this (high delta)
-		"metric - above max eps": {intakeSPS: 200, serviceName: "serviceD", opName: "opA", extractionRate: 1, pctTraceSampled: 0, expectedEPS: 100, deltaPct: 0.5, duration: 60 * time.Second},
-		"agent - below max eps":  {intakeSPS: 100, serviceName: "serviceB", opName: "opB", extractionRate: -1, pctTraceSampled: 0.5, expectedEPS: 50, deltaPct: 0.1, duration: 10 * time.Second},
+		{name: "metric - above max eps", intakeSPS: 200, serviceName: "serviceD", opName: "opA", extractionRate: 1, pctTraceSampled: 0, expectedEPS: 100, deltaPct: 0.5, duration: 60 * time.Second},
+		{name: "agent - below max eps", intakeSPS: 100, serviceName: "serviceB", opName: "opB", extractionRate: -1, pctTraceSampled: 0.5, expectedEPS: 50, deltaPct: 0.1, duration: 10 * time.Second},
 		// TODO: Attempt to reduce softness of this (high delta)
-		"agent - above max eps":  {intakeSPS: 200, serviceName: "serviceA", opName: "opC", extractionRate: -1, pctTraceSampled: 0, expectedEPS: 100, deltaPct: 0.5, duration: 60 * time.Second},
-		"legacy - below max eps": {intakeSPS: 100, serviceName: "serviceC", opName: "opB", extractionRate: -1, pctTraceSampled: 0.5, expectedEPS: 50, deltaPct: 0.1, duration: 10 * time.Second},
-		// TODO: Attempt to reduce softness of this (high delta)
-		"legacy - above max eps": {intakeSPS: 200, serviceName: "serviceD", opName: "opC", extractionRate: -1, pctTraceSampled: 0, expectedEPS: 100, deltaPct: 0.5, duration: 60 * time.Second},
+		{name: "agent - above max eps", intakeSPS: 200, serviceName: "serviceA", opName: "opC", extractionRate: -1, pctTraceSampled: 0, expectedEPS: 100, deltaPct: 0.5, duration: 60 * time.Second},
 
-		// Overrides / Fallbacks
-		"metric - overrides agent": {intakeSPS: 100, serviceName: "serviceA", opName: "opA", extractionRate: 1, pctTraceSampled: 0.5, expectedEPS: 100, deltaPct: 0.1, duration: 10 * time.Second},
-		"agent - overrides legacy": {intakeSPS: 100, serviceName: "serviceA", opName: "opA", extractionRate: -1, pctTraceSampled: 0.5, expectedEPS: 0, deltaPct: 0, duration: 10 * time.Second},
-		"legacy as fallback":       {intakeSPS: 100, serviceName: "serviceA", opName: "opD", extractionRate: -1, pctTraceSampled: 0.5, expectedEPS: 100, deltaPct: 0.1, duration: 10 * time.Second},
+		// Overrides
+		{name: "metric - overrides agent", intakeSPS: 100, serviceName: "serviceA", opName: "opA", extractionRate: 1, pctTraceSampled: 0.5, expectedEPS: 100, deltaPct: 0.1, duration: 10 * time.Second},
+
+		// Legacy should never be considered if fixed rate is being used.
+		{name: "legacy not applied", intakeSPS: 100, serviceName: "serviceA", opName: "opD", extractionRate: -1, pctTraceSampled: 0.5, expectedEPS: 0, deltaPct: 0, duration: 10 * time.Second},
 
 		// High number of sampled traces allows overflow of EPS
-		"metric - above max eps - all trace sampled": {intakeSPS: 200, serviceName: "serviceD", opName: "opA", extractionRate: 1, pctTraceSampled: 1, expectedEPS: 200, deltaPct: 0.1, duration: 10 * time.Second},
-		"agent - above max eps - all trace sampled":  {intakeSPS: 200, serviceName: "serviceA", opName: "opC", extractionRate: -1, pctTraceSampled: 1, expectedEPS: 200, deltaPct: 0.1, duration: 10 * time.Second},
-		"legacy - above max eps - all trace sampled": {intakeSPS: 200, serviceName: "serviceD", opName: "opC", extractionRate: -1, pctTraceSampled: 1, expectedEPS: 200, deltaPct: 0.1, duration: 10 * time.Second},
+		{name: "metric - above max eps - all trace sampled", intakeSPS: 200, serviceName: "serviceD", opName: "opA", extractionRate: 1, pctTraceSampled: 1, expectedEPS: 200, deltaPct: 0.1, duration: 10 * time.Second},
+		{name: "agent - above max eps - all trace sampled", intakeSPS: 200, serviceName: "serviceA", opName: "opC", extractionRate: -1, pctTraceSampled: 1, expectedEPS: 200, deltaPct: 0.1, duration: 10 * time.Second},
 	} {
-		t.Run(name, func(t *testing.T) {
-			processor := eventProcessorFromConf(&config.AgentConfig{
-				MaxEPS:                      testMaxEPS,
-				AnalyzedRateByServiceLegacy: rateByService,
-				AnalyzedSpansByService:      rateByServiceAndName,
-			})
-			processor.Start()
-
-			actualEPS := generateTraffic(processor, testCase.serviceName, testCase.opName, testCase.extractionRate,
-				testCase.duration, testCase.intakeSPS, testCase.pctTraceSampled)
-
-			processor.Stop()
-
-			assert.InDelta(t, testCase.expectedEPS, actualEPS, testCase.expectedEPS*testCase.deltaPct)
-		})
+		testEventProcessorFromConf(t, &config.AgentConfig{
+			MaxEPS:                      testMaxEPS,
+			AnalyzedSpansByService:      rateByServiceAndName,
+			AnalyzedRateByServiceLegacy: rateByService,
+		}, testCase)
 	}
+}
+
+func TestEventProcessorFromConfLegacy(t *testing.T) {
+	if testing.Short() {
+		return
+	}
+
+	testMaxEPS := 100.
+
+	rateByService := map[string]float64{
+		"serviceA": 1,
+		"serviceC": 0.5,
+		"serviceD": 1,
+	}
+
+	for _, testCase := range []eventProcessorTestCase{
+		{name: "no match", intakeSPS: 100, serviceName: "serviceE", opName: "opA", extractionRate: -1, pctTraceSampled: 0.5, expectedEPS: 0, deltaPct: 0, duration: 10 * time.Second},
+		{name: "legacy - below max eps", intakeSPS: 100, serviceName: "serviceC", opName: "opB", extractionRate: -1, pctTraceSampled: 0.5, expectedEPS: 50, deltaPct: 0.1, duration: 10 * time.Second},
+		// TODO: Attempt to reduce softness of this (high delta)
+		{name: "legacy - above max eps", intakeSPS: 200, serviceName: "serviceD", opName: "opC", extractionRate: -1, pctTraceSampled: 0, expectedEPS: 100, deltaPct: 0.5, duration: 60 * time.Second},
+
+		// Overrides
+		{name: "metric - overrides legacy", intakeSPS: 100, serviceName: "serviceC", opName: "opC", extractionRate: 1, pctTraceSampled: 0.5, expectedEPS: 100, deltaPct: 0.1, duration: 10 * time.Second},
+
+		// High number of sampled traces allows overflow of EPS
+		{name: "legacy - above max eps - all trace sampled", intakeSPS: 200, serviceName: "serviceD", opName: "opC", extractionRate: -1, pctTraceSampled: 1, expectedEPS: 200, deltaPct: 0.1, duration: 10 * time.Second},
+	} {
+		testEventProcessorFromConf(t, &config.AgentConfig{
+			MaxEPS:                      testMaxEPS,
+			AnalyzedRateByServiceLegacy: rateByService,
+		}, testCase)
+	}
+}
+
+type eventProcessorTestCase struct {
+	name            string
+	intakeSPS       float64
+	serviceName     string
+	opName          string
+	extractionRate  float64
+	pctTraceSampled float64
+	expectedEPS     float64
+	deltaPct        float64
+	duration        time.Duration
+}
+
+func testEventProcessorFromConf(t *testing.T, conf *config.AgentConfig, testCase eventProcessorTestCase) {
+	t.Run(testCase.name, func(t *testing.T) {
+		processor := eventProcessorFromConf(conf)
+		processor.Start()
+
+		actualEPS := generateTraffic(processor, testCase.serviceName, testCase.opName, testCase.extractionRate,
+			testCase.duration, testCase.intakeSPS, testCase.pctTraceSampled)
+
+		processor.Stop()
+
+		assert.InDelta(t, testCase.expectedEPS, actualEPS, testCase.expectedEPS*testCase.deltaPct)
+	})
 }
 
 // generateTraffic generates traces every 100ms with enough spans to meet the desired `intakeSPS` (intake spans per

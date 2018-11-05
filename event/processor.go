@@ -57,8 +57,7 @@ func (p *Processor) Process(t model.ProcessedTrace, params ProcessorParams) (eve
 	priority, hasPriority := t.GetSamplingPriority()
 
 	if !hasPriority {
-		// If priority is not set on a trace, assume priority 0
-		priority = 0
+		priority = model.UnknownPriority
 	}
 
 	for _, span := range t.WeightedTrace {

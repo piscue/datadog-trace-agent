@@ -105,7 +105,7 @@ func TestPrioritySample(t *testing.T) {
 	s = getTestPriorityEngine()
 	trace, root = getTestTraceWithService(t, "my-service", s)
 
-	root.SetSamplingPriority(999)
+	root.SetSamplingPriority(model.UserKeepPriority)
 	sampled, rate = s.Sample(trace, root, env)
 	assert.True(sampled, "trace with high priority is kept")
 	assert.Equal(1.0, rate, "sampling all traces")
