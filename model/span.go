@@ -20,7 +20,7 @@ type SamplingPriority int8
 
 const (
 	// UnknownPriority is the value for SamplingPriority when no priority sampling decision could be found.
-	PriorityUnknown SamplingPriority = math.MinInt8
+	PriorityNone SamplingPriority = math.MinInt8
 	// UserDropPriority is the value set by a user to explicitly drop a trace.
 	PriorityUserDrop SamplingPriority = -1
 	// AutoDropPriority is the value set by a tracer to suggest dropping a trace.

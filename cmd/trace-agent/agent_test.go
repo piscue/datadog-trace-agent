@@ -196,7 +196,7 @@ func TestProcess(t *testing.T) {
 
 		now := time.Now()
 		for _, key := range []model.SamplingPriority{
-			model.PriorityUnknown,
+			model.PriorityNone,
 			model.PriorityUserDrop,
 			model.PriorityUserDrop,
 			model.PriorityAutoDrop,
@@ -219,7 +219,7 @@ func TestProcess(t *testing.T) {
 				Duration: (500 * time.Millisecond).Nanoseconds(),
 				Metrics:  map[string]float64{},
 			}
-			if key != model.PriorityUnknown {
+			if key != model.PriorityNone {
 				span.SetSamplingPriority(key)
 			}
 			agent.Process(model.Trace{span})
