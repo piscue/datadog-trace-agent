@@ -14,6 +14,22 @@ const (
 	SamplingPriorityKey = "_sampling_priority_v1"
 )
 
+// SamplingPriority is the type encoding a priority sampling decision.
+type SamplingPriority int8
+
+const (
+	// UnknownPriority is the value for SamplingPriority when no priority sampling decision could be found.
+	UnknownPriority SamplingPriority = -99
+	// UserDropPriority is the value set by a user to explicitly drop a trace.
+	UserDropPriority SamplingPriority = -1
+	// AutoDropPriority is the value set by a tracer to suggest dropping a trace.
+	AutoDropPriority SamplingPriority = 0
+	// AutoKeepPriority is the value set by a tracer to suggest keeping a trace.
+	AutoKeepPriority SamplingPriority = 1
+	// UserKeepPriority is the value set by a user to explicitly keep a trace.
+	UserKeepPriority SamplingPriority = 2
+)
+
 // RandomID generates a random uint64 that we use for IDs
 func RandomID() uint64 {
 	return uint64(rand.Int63())
@@ -78,13 +94,13 @@ func (s *Span) SetMetric(key string, val float64) {
 
 // GetSamplingPriority returns the value of the sampling priority metric set on this span and a boolean indicating if
 // such a metric was actually found or not.
-func (s *Span) GetSamplingPriority() (int, bool) {
+func (s *Span) GetSamplingPriority() (SamplingPriority, bool) {
 	p, ok := s.GetMetric(SamplingPriorityKey)
-	return int(p), ok
+	return SamplingPriority(p), ok
 }
 
 // SetSamplingPriority sets the sampling priority value on this span, overwriting any previously set value.
-func (s *Span) SetSamplingPriority(priority int) {
+func (s *Span) SetSamplingPriority(priority SamplingPriority) {
 	s.SetMetric(SamplingPriorityKey, float64(priority))
 }
 
