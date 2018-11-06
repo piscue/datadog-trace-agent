@@ -10,5 +10,5 @@ type Extractor interface {
 	// true if an extraction should happen or false otherwise. It also returns a rate specifying the extraction rate
 	// taken into account for this decision. If the returned rate is RateNone, then this extractor
 	// didn't find anything to extract.
-	Extract(span *model.WeightedSpan, hasPriority bool, priority model.SamplingPriority) (extract bool, rate float64)
+	Extract(span *model.WeightedSpan, priority model.SamplingPriority) (extract bool, rate float64)
 }

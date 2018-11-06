@@ -1,6 +1,7 @@
 package model
 
 import (
+	"math"
 	"math/rand"
 )
 
@@ -18,6 +19,8 @@ const (
 type SamplingPriority int8
 
 const (
+	// PriorityNone is the value for SamplingPriority when no priority sampling decision could be found.
+	PriorityNone SamplingPriority = math.MinInt8
 	// PriorityUserDrop is the value set by a user to explicitly drop a trace.
 	PriorityUserDrop SamplingPriority = -1
 	// PriorityAutoDrop is the value set by a tracer to suggest dropping a trace.

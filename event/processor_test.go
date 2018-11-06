@@ -86,7 +86,7 @@ type MockExtractor struct {
 	rate float64
 }
 
-func (e *MockExtractor) Extract(s *model.WeightedSpan, hasPriority bool, priority model.SamplingPriority) (bool, float64) {
+func (e *MockExtractor) Extract(s *model.WeightedSpan, priority model.SamplingPriority) (bool, float64) {
 	if e.rate >= 0 {
 		return rand.Float64() < e.rate, e.rate
 	}
