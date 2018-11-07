@@ -26,6 +26,7 @@ const (
 	envLogLevel        = "DD_LOG_LEVEL"             // logging level
 	envAnalyzedSpans   = "DD_APM_ANALYZED_SPANS"    // spans to analyze for transactions
 	envConnectionLimit = "DD_CONNECTION_LIMIT"      // (deprecated) limit of unique connections
+	envMaxEPS          = "DD_MAX_EPS"               // Max events per second
 )
 
 // loadEnv applies overrides from environment variables to the trace agent configuration
@@ -112,6 +113,16 @@ func (c *AgentConfig) loadEnv() {
 			log.Errorf("Bad format for %s it should be of the form \"service_name|operation_name=rate,other_service|other_operation=rate\", error: %v", envAnalyzedSpans, err)
 		}
 	}
+
+	if v := os.Getenv(envMaxEPS); v != "" {
+		maxEPS, err := strconv.ParseFloat(v, 64)
+		if err != nil {
+			log.Errorf("Failed to parse %s: it should be a floating point number", envMaxEPS)
+		} else {
+			c.MaxEPS = maxEPS
+		}
+	}
+
 	for _, env := range []string{envProxyDeprecated, envProxy} {
 		if v, ok := os.LookupEnv(env); ok {
 			url, err := url.Parse(v)
