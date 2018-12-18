@@ -1,7 +1,7 @@
 // Unless explicitly stated otherwise all files in this repository are licensed
 // under the Apache License Version 2.0.
 // This product includes software developed at Datadog (https://www.datadoghq.com/).
-// Copyright 2017 Datadog, Inc.
+// Copyright 2018 Datadog, Inc.
 
 // +build docker
 
@@ -15,7 +15,7 @@ import (
 	ecsutil "github.com/DataDog/datadog-agent/pkg/util/ecs"
 )
 
-func (c *ECSCollector) parseTasks(tasks_list ecsutil.TasksV1Response) ([]*TagInfo, error) {
+func (c *ECSCollector) parseTasks(tasks_list ecsutil.TasksV1Response, targetDockerID string) ([]*TagInfo, error) {
 	var output []*TagInfo
 	now := time.Now()
 	for _, task := range tasks_list.Tasks {
@@ -24,11 +24,19 @@ func (c *ECSCollector) parseTasks(tasks_list ecsutil.TasksV1Response) ([]*TagInf
 			continue
 		}
 		for _, container := range task.Containers {
-			// We only want to collect the tags from new containers.
-			if c.expire.Update(container.DockerID, now) {
+			// Only collect new containers + the targeted container, to avoid empty tags on race conditions
+			if c.expire.Update(container.DockerID, now) || container.DockerID == targetDockerID {
 				tags := utils.NewTagList()
 				tags.AddLow("task_version", task.Version)
 				tags.AddLow("task_name", task.Family)
+				tags.AddLow("task_family", task.Family)
+				tags.AddLow("ecs_container_name", container.Name)
+
+				if c.clusterName != "" {
+					tags.AddLow("cluster_name", c.clusterName)
+				}
+
+				tags.AddHigh("task_arn", task.Arn)
 
 				low, high := tags.Compute()
 

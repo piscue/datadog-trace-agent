@@ -1,11 +1,16 @@
 // Unless explicitly stated otherwise all files in this repository are licensed
 // under the Apache License Version 2.0.
 // This product includes software developed at Datadog (https://www.datadoghq.com/).
-// Copyright 2017 Datadog, Inc.
+// Copyright 2018 Datadog, Inc.
 
 package pidfile
 
-import "syscall"
+import (
+	"path/filepath"
+	"syscall"
+
+	"github.com/DataDog/datadog-agent/pkg/util/winutil"
+)
 
 const (
 	processQueryLimitedInformation = 0x1000
@@ -30,5 +35,9 @@ func isProcess(pid int) bool {
 
 // Path returns a suitable location for the pidfile under Windows
 func Path() string {
+	pd, err := winutil.GetProgramDataDir()
+	if err == nil {
+		return filepath.Join(pd, "DataDog", "datadog-agent.pid")
+	}
 	return "c:\\ProgramData\\DataDog\\datadog-agent.pid"
 }

@@ -7,47 +7,49 @@ import (
 
 	log "github.com/cihub/seelog"
 
-	"github.com/DataDog/datadog-trace-agent/api"
-	"github.com/DataDog/datadog-trace-agent/config"
-	"github.com/DataDog/datadog-trace-agent/event"
-	"github.com/DataDog/datadog-trace-agent/filters"
-	"github.com/DataDog/datadog-trace-agent/info"
-	"github.com/DataDog/datadog-trace-agent/model"
-	"github.com/DataDog/datadog-trace-agent/obfuscate"
-	"github.com/DataDog/datadog-trace-agent/osutil"
-	"github.com/DataDog/datadog-trace-agent/sampler"
-	"github.com/DataDog/datadog-trace-agent/statsd"
-	"github.com/DataDog/datadog-trace-agent/watchdog"
-	"github.com/DataDog/datadog-trace-agent/writer"
+	"github.com/DataDog/datadog-trace-agent/internal/agent"
+	"github.com/DataDog/datadog-trace-agent/internal/api"
+	"github.com/DataDog/datadog-trace-agent/internal/config"
+	"github.com/DataDog/datadog-trace-agent/internal/event"
+	"github.com/DataDog/datadog-trace-agent/internal/filters"
+	"github.com/DataDog/datadog-trace-agent/internal/info"
+	"github.com/DataDog/datadog-trace-agent/internal/obfuscate"
+	"github.com/DataDog/datadog-trace-agent/internal/osutil"
+	"github.com/DataDog/datadog-trace-agent/internal/sampler"
+	"github.com/DataDog/datadog-trace-agent/internal/statsd"
+	"github.com/DataDog/datadog-trace-agent/internal/watchdog"
+	"github.com/DataDog/datadog-trace-agent/internal/writer"
 )
 
 const processStatsInterval = time.Minute
 
 // Agent struct holds all the sub-routines structs and make the data flow between them
 type Agent struct {
-	Receiver           *api.HTTPReceiver
-	Concentrator       *Concentrator
-	Blacklister        *filters.Blacklister
-	Replacer           *filters.Replacer
-	ScoreSampler       *Sampler
-	ErrorsScoreSampler *Sampler
-	PrioritySampler    *Sampler
-	EventProcessor     *event.Processor
-	TraceWriter        *writer.TraceWriter
-	ServiceWriter      *writer.ServiceWriter
-	StatsWriter        *writer.StatsWriter
-	ServiceExtractor   *TraceServiceExtractor
-	ServiceMapper      *ServiceMapper
+	Receiver             *api.HTTPReceiver
+	Concentrator         *Concentrator
+	Blacklister          *filters.Blacklister
+	Replacer             *filters.Replacer
+	ScoreSampler         *Sampler
+	ErrorsScoreSampler   *Sampler
+	PrioritySampler      *Sampler
+	EventProcessor       *event.Processor
+	TraceWriter          *writer.TraceWriter
+	ServiceWriter        *writer.ServiceWriter
+	StatsWriter          *writer.StatsWriter
+	CollectorTraceWriter *writer.CollectorTraceWriter
+	ServiceExtractor     *TraceServiceExtractor
+	ServiceMapper        *ServiceMapper
 
 	// obfuscator is used to obfuscate sensitive data from various span
 	// tags based on their type.
 	obfuscator *obfuscate.Obfuscator
 
-	tracePkgChan chan *writer.TracePackage
+	tracePkgChan       chan *writer.TracePackage
+	collectorTraceChan chan *agent.Trace
 
 	// config
 	conf    *config.AgentConfig
-	dynConf *config.DynamicConfig
+	dynConf *sampler.DynamicConfig
 
 	// Used to synchronize on a clean exit
 	ctx context.Context
@@ -56,14 +58,14 @@ type Agent struct {
 // NewAgent returns a new Agent object, ready to be started. It takes a context
 // which may be cancelled in order to gracefully stop the agent.
 func NewAgent(ctx context.Context, conf *config.AgentConfig) *Agent {
-	dynConf := config.NewDynamicConfig()
+	dynConf := sampler.NewDynamicConfig(conf.DefaultEnv)
 
 	// inter-component channels
-	rawTraceChan := make(chan model.Trace, 5000) // about 1000 traces/sec for 5 sec, TODO: move to *model.Trace
+	rawTraceChan := make(chan agent.Trace, 5000) // about 1000 traces/sec for 5 sec, TODO: move to *model.Trace
 	tracePkgChan := make(chan *writer.TracePackage)
-	statsChan := make(chan []model.StatsBucket)
-	serviceChan := make(chan model.ServicesMetadata, 50)
-	filteredServiceChan := make(chan model.ServicesMetadata, 50)
+	statsChan := make(chan []agent.StatsBucket)
+	serviceChan := make(chan agent.ServicesMetadata, 50)
+	filteredServiceChan := make(chan agent.ServicesMetadata, 50)
 
 	// create components
 	r := api.NewHTTPReceiver(conf, dynConf, rawTraceChan, serviceChan)
@@ -84,25 +86,34 @@ func NewAgent(ctx context.Context, conf *config.AgentConfig) *Agent {
 	sw := writer.NewStatsWriter(conf, statsChan)
 	svcW := writer.NewServiceWriter(conf, filteredServiceChan)
 
+	var collectorTraceChan chan *agent.Trace
+	var ctw *writer.CollectorTraceWriter
+	if conf.CollectorConfig.CollectorAddr != "" {
+		collectorTraceChan = make(chan *agent.Trace, 5000)
+		ctw = writer.NewCollectorTraceWriter(conf, collectorTraceChan)
+	}
+
 	return &Agent{
-		Receiver:           r,
-		Concentrator:       c,
-		Blacklister:        filters.NewBlacklister(conf.Ignore["resource"]),
-		Replacer:           filters.NewReplacer(conf.ReplaceTags),
-		ScoreSampler:       ss,
-		ErrorsScoreSampler: ess,
-		PrioritySampler:    ps,
-		EventProcessor:     ep,
-		TraceWriter:        tw,
-		StatsWriter:        sw,
-		ServiceWriter:      svcW,
-		ServiceExtractor:   se,
-		ServiceMapper:      sm,
-		obfuscator:         obf,
-		tracePkgChan:       tracePkgChan,
-		conf:               conf,
-		dynConf:            dynConf,
-		ctx:                ctx,
+		Receiver:             r,
+		Concentrator:         c,
+		Blacklister:          filters.NewBlacklister(conf.Ignore["resource"]),
+		Replacer:             filters.NewReplacer(conf.ReplaceTags),
+		ScoreSampler:         ss,
+		ErrorsScoreSampler:   ess,
+		PrioritySampler:      ps,
+		EventProcessor:       ep,
+		TraceWriter:          tw,
+		StatsWriter:          sw,
+		ServiceWriter:        svcW,
+		CollectorTraceWriter: ctw,
+		ServiceExtractor:     se,
+		ServiceMapper:        sm,
+		obfuscator:           obf,
+		tracePkgChan:         tracePkgChan,
+		collectorTraceChan:   collectorTraceChan,
+		conf:                 conf,
+		dynConf:              dynConf,
+		ctx:                  ctx,
 	}
 }
 
@@ -130,6 +141,10 @@ func (a *Agent) Run() {
 	a.PrioritySampler.Run()
 	a.EventProcessor.Start()
 
+	if a.CollectorTraceWriter != nil {
+		a.CollectorTraceWriter.Start()
+	}
+
 	for {
 		select {
 		case t := <-a.Receiver.Out:
@@ -150,6 +165,11 @@ func (a *Agent) Run() {
 			a.ErrorsScoreSampler.Stop()
 			a.PrioritySampler.Stop()
 			a.EventProcessor.Stop()
+
+			if a.CollectorTraceWriter != nil {
+				a.CollectorTraceWriter.Stop()
+			}
+
 			return
 		}
 	}
@@ -157,7 +177,7 @@ func (a *Agent) Run() {
 
 // Process is the default work unit that receives a trace, transforms it and
 // passes it downstream.
-func (a *Agent) Process(t model.Trace) {
+func (a *Agent) Process(t agent.Trace) {
 	if len(t) == 0 {
 		log.Debugf("skipping received empty trace")
 		return
@@ -202,6 +222,22 @@ func (a *Agent) Process(t model.Trace) {
 	}
 	a.Replacer.Replace(&t)
 
+	if a.CollectorTraceWriter != nil && len(t) > 0 {
+		traceID := t[0].TraceID
+		sampled := sampler.SampleByRate(traceID, a.conf.CollectorConfig.SamplingRate)
+		if sampled {
+			if a.conf.CollectorConfig.DualFlush {
+				// If the trace is going to be processed by the agent, copy it before sending
+				traceCopy := t.Clone()
+				a.collectorTraceChan <- &traceCopy
+			} else {
+				// Flush
+				a.collectorTraceChan <- &t
+				return
+			}
+		}
+	}
+
 	// Extract the client sampling rate.
 	clientSampleRate := root.GetSampleRate()
 	root.SetClientTraceSampleRate(clientSampleRate)
@@ -216,16 +252,16 @@ func (a *Agent) Process(t model.Trace) {
 	t.ComputeTopLevel()
 
 	subtraces := t.ExtractTopLevelSubtraces(root)
-	sublayers := make(map[*model.Span][]model.SublayerValue)
+	sublayers := make(map[*agent.Span][]agent.SublayerValue)
 	for _, subtrace := range subtraces {
-		subtraceSublayers := model.ComputeSublayers(subtrace.Trace)
+		subtraceSublayers := agent.ComputeSublayers(subtrace.Trace)
 		sublayers[subtrace.Root] = subtraceSublayers
-		model.SetSublayersOnSpan(subtrace.Root, subtraceSublayers)
+		agent.SetSublayersOnSpan(subtrace.Root, subtraceSublayers)
 	}
 
-	pt := model.ProcessedTrace{
+	pt := agent.ProcessedTrace{
 		Trace:         t,
-		WeightedTrace: model.NewWeightedTrace(t, root),
+		WeightedTrace: agent.NewWeightedTrace(t, root),
 		Root:          root,
 		Env:           a.conf.DefaultEnv,
 		Sublayers:     sublayers,
@@ -240,7 +276,7 @@ func (a *Agent) Process(t model.Trace) {
 		a.ServiceExtractor.Process(pt.WeightedTrace)
 	}()
 
-	go func(pt model.ProcessedTrace) {
+	go func(pt agent.ProcessedTrace) {
 		defer watchdog.LogOnPanic()
 		// Everything is sent to concentrator for stats, regardless of sampling.
 		a.Concentrator.Add(pt)
@@ -251,7 +287,7 @@ func (a *Agent) Process(t model.Trace) {
 		return
 	}
 	// Run both full trace sampling and transaction extraction in another goroutine.
-	go func(pt model.ProcessedTrace) {
+	go func(pt agent.ProcessedTrace) {
 		defer watchdog.LogOnPanic()
 
 		tracePkg := writer.TracePackage{}
@@ -277,7 +313,7 @@ func (a *Agent) Process(t model.Trace) {
 	}(pt)
 }
 
-func (a *Agent) sample(pt model.ProcessedTrace) (sampled bool, rate float64) {
+func (a *Agent) sample(pt agent.ProcessedTrace) (sampled bool, rate float64) {
 	var sampledPriority, sampledScore bool
 	var ratePriority, rateScore float64
 
@@ -327,7 +363,7 @@ func (a *Agent) watchdog() {
 	info.UpdatePreSampler(*preSamplerStats)
 }
 
-func traceContainsError(trace model.Trace) bool {
+func traceContainsError(trace agent.Trace) bool {
 	for _, span := range trace {
 		if span.Error != 0 {
 			return true

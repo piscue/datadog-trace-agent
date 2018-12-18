@@ -17,7 +17,7 @@ VERSION_PATCH := $(if $(VERSION_PATCH),$(VERSION_PATCH), 0)
 
 install:
 	# generate versioning information and installing the binary.
-	go generate ./info
+	go generate ./internal/info
 	go install ./cmd/trace-agent
 
 binaries:
@@ -34,12 +34,18 @@ binaries:
 
 ci:
 	# task used by CI
-	GOOS=windows go build ./cmd/trace-agent # ensure windows builds
 	go get -u golang.org/x/lint/golint
-	golint -set_exit_status=1 ./cmd/trace-agent ./filters ./api ./testutil ./info ./quantile ./obfuscate ./sampler ./statsd ./watchdog ./writer ./flags ./osutil
+	golint -set_exit_status=1 ./cmd/trace-agent ./internal/filters ./internal/api ./internal/test ./internal/info ./internal/quantile ./internal/obfuscate ./internal/sampler ./internal/statsd ./internal/watchdog ./internal/writer ./internal/flags ./internal/osutil
+	go install ./cmd/trace-agent
 	go test -v -race ./...
 
 windows:
 	# pre-packages resources needed for the windows release
 	windmc --target pe-x86-64 -r cmd/trace-agent/windows_resources cmd/trace-agent/windows_resources/trace-agent-msg.mc
 	windres --define MAJ_VER=$(VERSION_MAJOR) --define MIN_VER=$(VERSION_MINOR) --define PATCH_VER=$(VERSION_PATCH) -i cmd/trace-agent/windows_resources/trace-agent.rc --target=pe-x86-64 -O coff -o cmd/trace-agent/rsrc.syso
+
+.PHONY: proto
+proto: internal/collector/collector.pb.go
+
+internal/collector/collector.pb.go: internal/collector/collector.proto
+	protoc -I ../../../ -I internal/collector --go_out=plugins=grpc:internal/collector internal/collector/collector.proto
