@@ -1,14 +1,15 @@
 package writer
 
 import (
+	"encoding/json"
 	"strings"
 	"sync/atomic"
 	"time"
 
-	"github.com/DataDog/datadog-trace-agent/internal/agent"
 	"github.com/DataDog/datadog-trace-agent/internal/config"
 	"github.com/DataDog/datadog-trace-agent/internal/info"
 	"github.com/DataDog/datadog-trace-agent/internal/metrics"
+	"github.com/DataDog/datadog-trace-agent/internal/pb"
 	"github.com/DataDog/datadog-trace-agent/internal/watchdog"
 	writerconfig "github.com/DataDog/datadog-trace-agent/internal/writer/config"
 	log "github.com/cihub/seelog"
@@ -20,16 +21,16 @@ const pathServices = "/api/v0.2/services"
 type ServiceWriter struct {
 	stats      info.ServiceWriterInfo
 	conf       writerconfig.ServiceWriterConfig
-	InServices <-chan agent.ServicesMetadata
+	InServices <-chan pb.ServicesMetadata
 
-	serviceBuffer agent.ServicesMetadata
+	serviceBuffer pb.ServicesMetadata
 
 	sender payloadSender
 	exit   chan struct{}
 }
 
 // NewServiceWriter returns a new writer for services.
-func NewServiceWriter(conf *config.AgentConfig, InServices <-chan agent.ServicesMetadata) *ServiceWriter {
+func NewServiceWriter(conf *config.AgentConfig, InServices <-chan pb.ServicesMetadata) *ServiceWriter {
 	cfg := conf.ServiceWriterConfig
 	endpoints := newEndpoints(conf, pathServices)
 	sender := newMultiSender(endpoints, cfg.SenderConfig)
@@ -38,7 +39,7 @@ func NewServiceWriter(conf *config.AgentConfig, InServices <-chan agent.Services
 	return &ServiceWriter{
 		conf:          cfg,
 		InServices:    InServices,
-		serviceBuffer: agent.ServicesMetadata{},
+		serviceBuffer: pb.ServicesMetadata{},
 		sender:        sender,
 		exit:          make(chan struct{}),
 	}
@@ -118,8 +119,10 @@ func (w *ServiceWriter) Stop() {
 	w.sender.Stop()
 }
 
-func (w *ServiceWriter) handleServiceMetadata(metadata agent.ServicesMetadata) {
-	w.serviceBuffer.Merge(metadata)
+func (w *ServiceWriter) handleServiceMetadata(metadata pb.ServicesMetadata) {
+	for k, v := range metadata {
+		w.serviceBuffer[k] = v
+	}
 }
 
 func (w *ServiceWriter) flush() {
@@ -132,10 +135,10 @@ func (w *ServiceWriter) flush() {
 	log.Debugf("going to flush updated service metadata, %d services", numServices)
 	atomic.StoreInt64(&w.stats.Services, int64(numServices))
 
-	data, err := agent.EncodeServicesPayload(w.serviceBuffer)
+	data, err := json.Marshal(w.serviceBuffer)
 	if err != nil {
 		log.Errorf("error while encoding service payload: %v", err)
-		w.serviceBuffer = make(agent.ServicesMetadata)
+		w.serviceBuffer = make(pb.ServicesMetadata)
 		return
 	}
 
@@ -149,7 +152,7 @@ func (w *ServiceWriter) flush() {
 	payload := newPayload(data, headers)
 	w.sender.Send(payload)
 
-	w.serviceBuffer = make(agent.ServicesMetadata)
+	w.serviceBuffer = make(pb.ServicesMetadata)
 }
 
 func (w *ServiceWriter) updateInfo() {
